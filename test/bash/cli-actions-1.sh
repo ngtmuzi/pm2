@@ -125,8 +125,8 @@ spec "Should list processes successfully"
 $pm2 start multi-echo.json
 spec "Should start multiple applications"
 
-$pm2 generate echo
-spec "Should generate echo sample json"
+$pm2 init echo
+spec "Should init echo sample json"
 
 $pm2 start echo-pm2.json -f
 spec "Should start echo service"
@@ -135,11 +135,11 @@ $pm2 list
 
 # Not consistent on travis :(
 # OUT=`$pm2 logs --nostream --lines 10 PM2 | wc -l`
-# [ $OUT -gt 10 ] || fail "Error : pm2 logs ouput showed $OUT lines but min is 10" 
+# [ $OUT -gt 10 ] || fail "Error : pm2 logs ouput showed $OUT lines but min is 10"
 # success "should only print logs"
 
 # OUT=`$pm2 logs --nostream --lines 100 PM2 | wc -l`
-# [ $OUT -gt 100 ] || fail "Error : pm2 logs ouput showed $OUT  lines but min is 100" 
+# [ $OUT -gt 100 ] || fail "Error : pm2 logs ouput showed $OUT  lines but min is 100"
 # success "should only print logs: "
 
 # sleep 1
@@ -157,47 +157,49 @@ $pm2 list
 # spec "Should kill logs"
 
 
-$pm2 web
-spec "Should start web interface"
+# $pm2 web
+# spec "Should start web interface"
 
-sleep 0.3
+# sleep 1
 
-JSON_FILE='/tmp/web-json'
+# JSON_FILE='/tmp/web-json'
 
-$http_get -q http://localhost:9615/ -O $JSON_FILE
-cat $JSON_FILE | grep "HttpInterface.js" > /dev/null
-spec "Should get the right JSON with HttpInterface file launched"
+# $http_get -q http://localhost:9615/ -O $JSON_FILE
+# cat $JSON_FILE | grep "HttpInterface.js" > /dev/null
+# spec "Should get the right JSON with HttpInterface file launched"
 
-$pm2 flush
-spec "Should clean logs"
+# $pm2 flush
+# spec "Should clean logs"
 
-# cat ~/.pm2/logs/echo-out.log | wc -l
-# spec "File Log should be cleaned"
+# # cat ~/.pm2/logs/echo-out.log | wc -l
+# # spec "File Log should be cleaned"
 
-sleep 0.3
-$http_get -q http://localhost:9615/ -O $JSON_FILE
-cat $JSON_FILE | grep "restart_time\":0" > /dev/null
-spec "Should get the right JSON with HttpInterface file launched"
+# sleep 1
+# $http_get -q http://localhost:9615/ -O $JSON_FILE
+# cat $JSON_FILE | grep "restart_time\":0" > /dev/null
+# spec "Should get the right JSON with HttpInterface file launched"
 
-#
-# Restart only one process
-#
-$pm2 restart 1
-should 'should has restarted process' 'restart_time: 1' 1
+# #
+# # Restart only one process
+# #
+# $pm2 restart 1
+# should 'should has restarted process' 'restart_time: 1' 1
 
-#
-# Restart all processes
-#
-$pm2 restart all
-spec "Should restart all processes"
+# #
+# # Restart all processes
+# #
+# $pm2 restart all
+# spec "Should restart all processes"
 
-sleep 1
-$http_get -q http://localhost:9615/ -O $JSON_FILE
-OUT=`cat $JSON_FILE | grep -o "restart_time\":1" | wc -l`
+# sleep 1
+# $http_get -q http://localhost:9615/ -O $JSON_FILE
+# OUT=`cat $JSON_FILE | grep -o "restart_time\":1" | wc -l`
 
-[ $OUT -eq 7 ] || fail "Error while wgeting data via web interface"
-success "Got data from interface"
+# [ $OUT -eq 7 ] || fail "Error while wgeting data via web interface"
+# success "Got data from interface"
 
+
+$pm2 start echo-env.js
 
 $pm2 list
 

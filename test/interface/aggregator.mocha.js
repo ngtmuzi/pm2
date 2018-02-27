@@ -62,22 +62,24 @@ describe('Transactions Aggregator', function() {
 
     it('should be an identifier (uuid)', function() {
       aggregator.isIdentifier('123e4567-e89b-12d3-a456-426655440000').should.equal(true);
+      aggregator.isIdentifier('123e4567e89b12d3a456426655440000').should.equal(true);
     });
 
-    it('should be an identifier (uuid w/o dash)', function() {
-      aggregator.isIdentifier('123e4567e89b12d3a456426655440000').should.equal(true);
+    it('should be an identifier', function() {
+      aggregator.isIdentifier('toto-toto-tooa').should.equal(true);
+      aggregator.isIdentifier('toto@toto.fr').should.equal(true);
+      aggregator.isIdentifier('toto@toto.fr').should.equal(true);
+      aggregator.isIdentifier('fontawesome-webfont.eot').should.equal(true);
+      aggregator.isIdentifier('life_is_just_fantasy').should.equal(true);
+      aggregator.isIdentifier('OR-IS_THIS-REAL_LIFE').should.equal(true);
     });
 
     it('should be NOT an identifier', function() {
       aggregator.isIdentifier('bucket').should.equal(false);
-    });
-
-    it('should be NOT an identifier', function() {
       aggregator.isIdentifier('admin').should.equal(false);
-    });
-
-    it('should be NOT an identifier', function() {
       aggregator.isIdentifier('auth').should.equal(false);
+      aggregator.isIdentifier('users').should.equal(false);
+      aggregator.isIdentifier('version').should.equal(false);
     });
   });
 
@@ -85,6 +87,15 @@ describe('Transactions Aggregator', function() {
     var routes = {
       'bucket/6465577': { spans: true }
     };
+
+    it('should not fail', function() {
+      aggregator.matchPath();
+      aggregator.matchPath('/');
+      aggregator.matchPath('/', {});
+      aggregator.matchPath('/', {
+        '/' : {}
+      });
+    });
 
     it('should match first route', function() {
       var match = aggregator.matchPath('bucket/67754', routes);
@@ -114,12 +125,15 @@ describe('Transactions Aggregator', function() {
     };
 
     it('should not fail', function() {
+      aggregator.mergeTrace()
       aggregator.mergeTrace(null, trace)
+      aggregator.mergeTrace({}, trace)
+      aggregator.mergeTrace({})
     });
 
     it('should add a trace', function() {
       aggregator.mergeTrace(ROUTES['yoloswag/swag'], trace)
-      ROUTES['yoloswag/swag'].meta.count.should.be.equal(1);
+      ROUTES['yoloswag/swag'].meta.histogram.getCount().should.be.equal(1);
       ROUTES['yoloswag/swag'].variances.length.should.be.equal(1);
       ROUTES['yoloswag/swag'].variances[0].spans.length.should.be.equal(3);
     });
@@ -127,7 +141,7 @@ describe('Transactions Aggregator', function() {
     it('should merge with the first variance', function() {
       aggregator.mergeTrace(ROUTES['yoloswag/swag'], trace);
       ROUTES['yoloswag/swag'].variances.length.should.be.equal(1);
-      ROUTES['yoloswag/swag'].variances[0].count.should.be.equal(2);
+      ROUTES['yoloswag/swag'].variances[0].histogram.getCount().should.be.equal(2);
     });
 
     it('should merge as a new variance with the same route', function () {
@@ -136,10 +150,10 @@ describe('Transactions Aggregator', function() {
         span.min = span.max = span.mean = Math.round(new Date(span.endTime) - new Date(span.startTime));
       })
       aggregator.mergeTrace(ROUTES['yoloswag/swag'], trace2);
-      ROUTES['yoloswag/swag'].meta.count.should.be.equal(3);
+      ROUTES['yoloswag/swag'].meta.histogram.getCount().should.be.equal(3);
       ROUTES['yoloswag/swag'].variances.length.should.be.equal(2);
-      ROUTES['yoloswag/swag'].variances[0].count.should.be.equal(2);
-      ROUTES['yoloswag/swag'].variances[1].count.should.be.equal(1);
+      ROUTES['yoloswag/swag'].variances[0].histogram.getCount().should.be.equal(2);
+      ROUTES['yoloswag/swag'].variances[1].histogram.getCount().should.be.equal(1);
       ROUTES['yoloswag/swag'].variances[1].spans.length.should.be.equal(4);
     });
   });
@@ -161,8 +175,9 @@ describe('Transactions Aggregator', function() {
       packet = TraceFactory.generatePacket('sisi/aight', 'appname');
       aggregator.aggregate(packet);
       packet = TraceFactory.generatePacket('sisi/aight', 'APP2');
+      aggregator.aggregate(packet);
 
-      var agg = aggregator.aggregate(packet);
+      var agg = aggregator.getAggregation();
 
       // should get 2 apps in agg
       should.exist(agg['appname']);
@@ -172,13 +187,12 @@ describe('Transactions Aggregator', function() {
       Object.keys(agg['appname'].routes).length.should.eql(2);
       should.exist(agg['appname'].process);
       agg['appname'].meta.trace_count.should.eql(4);
-      should.exist(agg['appname'].meta.mean_latency);
+      should.exist(agg['appname'].meta.histogram.percentiles([0.5])[0.5]);
 
       // should pm_id not taken into account
       should.not.exist(agg['appname'].process.pm_id);
     });
   });
-
 
   describe('.normalizeAggregation', function() {
     it('should get normalized aggregattion', function(done) {
@@ -189,17 +203,37 @@ describe('Transactions Aggregator', function() {
     });
   });
 
-  describe('.parseStacktrace', function() {
-    it('should parse stacktrace and get context', function(done) {
-      var obj = [{
-        labels: {
-          stacktrace: JSON.stringify(TraceFactory.stacktrace)
-        } }]
-      aggregator.parseStacktrace(obj);
-      obj[0].labels['source/file'].indexOf('test/interface/misc/trace_factory.js:10').should.be.above(0);
-      should(obj[0].labels['source/context']).eql("var random_routes = [\n  '/api/bucket',\n>>'/api/bucket/users',\n  '/api/bucket/chameau',\n  '/backo/testo'")
-      done();
+  describe('.resetAggregation and .clearData', function() {
+    it('should get transactions', function() {
+      var cache = aggregator.getAggregation();
+      Object.keys(cache).length.should.eql(2);
     });
+
+    it('should .resetAggregation for "appname" app', function() {
+      var cache = aggregator.getAggregation();
+
+      cache['appname'].meta.trace_count.should.eql(4);
+      Object.keys(cache['appname'].routes).length.should.eql(2);
+
+      aggregator.resetAggregation('appname', {})
+      cache = aggregator.getAggregation();
+      Object.keys(cache).length.should.eql(2);
+
+      cache['appname'].meta.trace_count.should.eql(0);
+      Object.keys(cache['appname'].routes).length.should.eql(0);
+    });
+
+    it('should .clearData', function() {
+      var cache = aggregator.getAggregation();
+      cache['APP2'].meta.trace_count.should.eql(1);
+      Object.keys(cache['APP2'].routes).length.should.eql(1);
+      aggregator.clearData();
+
+      cache = aggregator.getAggregation();
+      cache['APP2'].meta.trace_count.should.eql(0);
+      Object.keys(cache['APP2'].routes).length.should.eql(0);
+    });
+
   });
 
 });

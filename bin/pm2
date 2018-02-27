@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-
 'use strict';
+
+var semver = require('semver');
+
+if (semver.satisfies(process.versions.node, '>= 5.7.0'))
+  require('v8-compile-cache');
 
 process.env.PM2_USAGE = 'CLI';
 
 var cst       = require('../constants.js');
 
 var commander = require('commander');
-var fs        = require('fs');
 var chalk     = require('chalk');
 var async     = require('async');
 
@@ -16,6 +19,17 @@ var PM2       = require('../lib/API.js');
 var pkg       = require('../package.json');
 var tabtab    = require('../lib/completion.js');
 
+// Early detection of silent to avoid printing motd
+if (process.argv.indexOf('--silent') > -1 ||
+    process.argv.indexOf('-s') > -1) {
+  process.env.PM2_DISCRETE_MODE = true;
+}
+
+if (process.argv.indexOf('-v') > -1) {
+  console.log(pkg.version);
+  process.exit(0);
+}
+
 var pm2 = new PM2();
 
 commander.version(pkg.version)
@@ -23,8 +37,10 @@ commander.version(pkg.version)
   .option('-s --silent', 'hide all messages', false)
   .option('-m --mini-list', 'display a compacted list without formatting')
   .option('-f --force', 'force actions')
+  .option('--disable-logs', 'do not write logs')
   .option('-n --name <name>', 'set a <name> for script')
   .option('-i --instances <number>', 'launch [number] instances (for networked app)(load balanced)')
+  .option('--parallel <number>', 'number of parallel actions (for restart/reload)')
   .option('-l --log [path]', 'specify entire log file (error and out are both included)')
   .option('-o --output <path>', 'specify out log file')
   .option('-e --error <path>', 'specify error log file')
@@ -38,21 +54,26 @@ commander.version(pkg.version)
   .option('-x --execute-command', 'execute a program using fork system')
   .option('--max-restarts [count]', 'only restart the script COUNT times')
   .option('-u --user <username>', 'define user when generating startup script')
+  .option('--uid <uid>', 'run target script with <uid> rights')
+  .option('--gid <gid>', 'run target script with <gid> rights')
+  .option('--cwd <path>', 'run target script as <username>')
   .option('--hp <home path>', 'define home path when generating startup script')
+  .option('--wait-ip', 'override systemd script to wait for full internet connectivity to launch pm2')
+  .option('--service-name <name>', 'define service name when generating startup script')
   .option('-c --cron <cron_pattern>', 'restart a running process based on a cron pattern')
   .option('-w --write', 'write configuration in local folder')
   .option('--interpreter <interpreter>', 'the interpreter pm2 should use for executing app (bash, python...)')
   .option('--interpreter-args <arguments>', 'interpret options (alias of --node-args)')
-  .option('--log-date-format <momentjs format>', 'add custom prefix timestamp to logs')
+  .option('--log-date-format <date format>', 'add custom prefix timestamp to logs')
   .option('--no-daemon', 'run pm2 daemon in the foreground if it doesn\'t exist already')
-  .option('-a --update-env', 'update environmnent on restart/reload (-a <=> apply)')
+  .option('-a --update-env', 'update environment on restart/reload (-a <=> apply)')
   .option('--source-map-support', 'force source map support')
   .option('--only <application-name>', 'with json declaration, allow to only act on one application')
   .option('--disable-source-map-support', 'force source map support')
   .option('--wait-ready', 'ask pm2 to wait for ready event from your app')
   .option('--merge-logs', 'merge logs from different instances but keep error and out separated')
   .option('--watch [paths]', 'watch application folder for changes', function(v, m) { m.push(v); return m;}, [])
-  .option('--ignore-watch <folders|files>', 'folder/files to be ignored watching, chould be a specific name or regex - e.g. --ignore-watch="test node_modules \"some scripts\""')
+  .option('--ignore-watch <folders|files>', 'folder/files to be ignored watching, should be a specific name or regex - e.g. --ignore-watch="test node_modules \"some scripts\""')
   .option('--node-args <node_args>', 'space delimited arguments to pass to node in cluster mode - e.g. --node-args="--debug=7001 --trace-deprecation"')
   .option('--no-color', 'skip colors')
   .option('--no-vizion', 'start an app without vizion feature (versioning control)')
@@ -63,6 +84,10 @@ commander.version(pkg.version)
   .option('--trace', 'enable transaction tracing with km')
   .option('--disable-trace', 'disable transaction tracing with km')
   .option('--attach', 'attach logging after your start/restart/stop/reload')
+  .option('--sort <field_name:sort>', 'sort process according to field\'s name')
+  .option('--v8', 'enable v8 data collecting')
+  .option('--event-loop-inspector', 'enable event-loop-inspector dump in pmx')
+  .option('--deep-monitoring', 'enable all monitoring tools (equivalent to --v8 --event-loop-inspector --trace)')
   .usage('[cmd] app');
 
 commander.on('--help', function() {
@@ -230,8 +255,20 @@ function patchCommanderArg(cmd) {
 //
 commander.command('start <file|json|stdin|app_name|pm_id...>')
   .option('--watch', 'Watch folder for changes')
+  .option('--fresh', 'Rebuild Dockerfile')
+  .option('--daemon', 'Run container in Daemon mode (debug purposes)')
+  .option('--container', 'Start application in container mode')
+  .option('--dist', 'with --container; change local Dockerfile to containerize all files in current directory')
+  .option('--image-name [name]', 'with --dist; set the exported image name')
+  .option('--node-version [major]', 'with --container, set a specific major Node.js version')
+  .option('--dockerdaemon', 'for debugging purpose')
   .description('start and daemonize an app')
-  .action(function(cmd) {
+  .action(function(cmd, opts) {
+    if (opts.container == true && opts.dist == true)
+      return pm2.dockerMode(cmd, opts, 'distribution');
+    else if (opts.container == true)
+      return pm2.dockerMode(cmd, opts, 'development');
+
     if (cmd == "-") {
       process.stdin.resume();
       process.stdin.setEncoding('utf8');
@@ -249,33 +286,6 @@ commander.command('start <file|json|stdin|app_name|pm_id...>')
         pm2.speedList(err ? 1 : 0);
       });
     }
-  });
-
-//
-// Docker mode
-//
-commander.command('docker:gen <file|config>')
-  .description('generate Dockerfile in current folder')
-  .option('--force', 'Force regeneration of Dockerfile')
-  .action(function(script, opts) {
-    pm2.generateDockerfile(script, commander);
-  });
-
-commander.command('docker:dev <file|config>')
-  .option('--fresh', 'Rebuild Dockerfile')
-  .option('--daemon', 'Run container in Daemon mode (debug purposes)')
-  .description('wrap application into Docker container')
-  .action(function(script, opts) {
-    pm2.dockerMode(script, opts, 'development');
-  });
-
-commander.command('docker:dist <file|config> <image_name>')
-  .option('--fresh', 'Rebuild Dockerfile')
-  .option('--daemon', 'Run container in Daemon mode (debug purposes)')
-  .description('wrap application into Docker container')
-  .action(function(script, image_name, opts) {
-    opts.imageName = image_name;
-    pm2.dockerMode(script, opts, 'distribution');
   });
 
 commander.command('trigger <proc_name> <action_name> [params]')
@@ -300,6 +310,12 @@ commander.command('startOrReload <json>')
   .description('start or gracefully reload JSON file')
   .action(function(file) {
     pm2._startJson(file, commander, 'reloadProcessId');
+  });
+
+commander.command('pid [app_name]')
+  .description('return pid of [app_name] or all')
+  .action(function(app) {
+    pm2.getPID(app);
   });
 
 commander.command('startOrGracefulReload <json>')
@@ -448,11 +464,17 @@ commander.command('update')
 /**
  * Module specifics
  */
-commander.command('install <module|git:// url>')
+commander.command('install [module|git:// url|json]')
   .alias('module:install')
-  .description('install or update a module and run it forever')
-  .action(function(plugin_name) {
-    pm2.install(plugin_name);
+  .option('--v1', 'install module in v1 manner (do not use it)')
+  .option('--safe [time]', 'keep module backup, if new module fail = restore with previous')
+  .description('install or update a module (or a set of modules) and run it forever')
+  .action(function(plugin_name, opts) {
+    if (opts.v1)
+      commander.v1 = true;
+    if (opts.safe)
+      commander.safe = opts.safe;
+    pm2.install(plugin_name, commander);
   });
 
 commander.command('module:update <module|git:// url>')
@@ -483,7 +505,7 @@ commander.command('publish')
     pm2.publish();
   });
 
-commander.command('set <key> <value>')
+commander.command('set [key] [value]')
   .description('sets the specified config <key> <value>')
   .action(function(key, value) {
     pm2.set(key, value);
@@ -519,11 +541,56 @@ commander.command('unset <key>')
     pm2.unset(key);
   });
 
-commander.command('link [secret_key|command] [public_key] [machine_name]')
+commander.command('report')
+  .description('give a full pm2 report for https://github.com/Unitech/pm2/issues')
+  .action(function(key) {
+    pm2.report();
+  });
+
+//
+// Keymetrics CLI integratio
+//
+commander.command('link [secret] [public] [name]')
   .alias('interact')
   .option('--info-node [url]', 'set url info node')
   .description('linking action to keymetrics.io - command can be stop|info|delete|restart')
   .action(pm2._pre_interact.bind(pm2));
+
+commander.command('unlink')
+  .description('linking action to keymetrics.io - command can be stop|info|delete|restart')
+  .action(function() {
+    pm2.unlink();
+  });
+
+commander.command('unmonitor [name]')
+  .description('unmonitor target process')
+  .action(function(name) {
+    pm2.monitorState('unmonitor', name);
+  });
+
+commander.command('monitor [name]')
+  .description('monitor target process')
+  .action(function(name) {
+    pm2.monitorState('monitor', name);
+  });
+
+commander.command('open')
+  .description('open dashboard in browser')
+  .action(function(name) {
+    pm2.openDashboard();
+  });
+
+commander.command('register')
+  .description('create an account on keymetrics')
+  .action(function(name) {
+    pm2.registerToKM();
+  });
+
+commander.command('login')
+  .description('login to keymetrics and link current PM2')
+  .action(function(name) {
+    pm2.loginToKM();
+  });
 
 //
 // Web interface
@@ -544,6 +611,25 @@ commander.command('dump')
   .action(failOnUnknown(function() {
     pm2.dump();
   }));
+
+//
+// Save processes to file
+//
+commander.command('send <pm_id> <line>')
+  .description('send stdin to <pm_id>')
+  .action(function(pm_id, line) {
+    pm2.sendLineToStdin(pm_id, line);
+  });
+
+//
+// Attach to stdin/stdout
+// Not TTY ready
+//
+commander.command('attach <pm_id> [command separator]')
+  .description('attach stdin/stdout to application identified by <pm_id>')
+  .action(function(pm_id, separator) {
+    pm2.attach(pm_id, separator);
+  });
 
 //
 // Resurrect
@@ -587,7 +673,7 @@ commander.command('logrotate')
 //
 
 commander.command('ecosystem [mode]')
-  .alias('generate')
+  .alias('init')
   .description('generate a process conf file. (mode = null or simple)')
   .action(function(mode) {
     pm2.generateSample(mode);
@@ -630,12 +716,17 @@ commander
   .command('list')
   .alias('ls')
   .description('list all processes')
-  .option('--watch', 'constant refresh of process listing')
   .action(function() {
     pm2.list(commander)
   });
 
 commander.command('l')
+  .description('(alias) list all processes')
+  .action(function() {
+    pm2.list()
+  });
+
+commander.command('ps')
   .description('(alias) list all processes')
   .action(function() {
     pm2.list()
@@ -666,7 +757,6 @@ commander.command('prettylist')
 // Dashboard command
 //
 commander.command('monit')
-  .alias('m')
   .description('launch termcaps monitoring')
   .action(function() {
     pm2.dashboard();
@@ -727,7 +817,7 @@ commander.command('logs [id|name]')
     var exclusive = false;
     var timestamp = false;
 
-    if(!isNaN(cmd.lines)){
+    if(!isNaN(parseInt(cmd.lines))) {
       line = parseInt(cmd.lines);
     }
 

@@ -21,14 +21,22 @@ spec "Second hard cli tests"
 # Power feature
 bash ./test/bash/pm2-dev.sh
 spec "pm2-dev"
+bash ./test/bash/pm2-runtime.sh
+spec "pm2-runtime"
+bash ./test/bash/options-via-env.sh
+spec "set option via environment"
 bash ./test/bash/startup.sh
 spec "upstart startup test"
+bash ./test/bash/dump.sh
+spec "dump test"
 bash ./test/bash/resurrect.sh
 spec "resurrect test"
 # bash ./test/bash/docker.sh
 # spec "Docker tests"
 bash ./test/bash/nvm-node-version.sh
 spec "NVM node version setting"
+bash ./test/bash/mjs.sh
+spec "Test import syntax"
 
 bash ./test/bash/cron-system.sh
 spec "Cron system tests"
@@ -99,6 +107,8 @@ bash ./test/bash/log-entire.sh
 spec "merge stdout && stderr"
 bash ./test/bash/module.sh
 spec "module system"
+bash ./test/bash/module-safeguard.sh
+spec "module safeguard system (--safe)"
 bash ./test/bash/vizion.sh
 spec "vizion features (versioning control)"
 bash ./test/bash/wrapped-fork.sh
@@ -117,12 +127,22 @@ bash ./test/bash/wait-ready-event.sh
 spec "Wait for application ready event"
 bash ./test/bash/serve.sh
 spec "pm2 serve CLI method"
+bash ./test/bash/monit.sh
+spec "km selective monitoring "
 bash ./test/bash/log-null.sh
 spec "Logging path set to null"
 bash ./test/bash/log-json.sh
 spec "Logging directly to file in json"
 bash ./test/bash/operate-regex.sh
 spec "Operate process that match regex"
+bash ./test/bash/daemon-paths-override.sh
+spec "Override daemon configuration paths"
+bash ./test/bash/increment-var.sh
+spec "Increment env variables"
+bash ./test/bash/instance-number.sh
+spec "Negative instance number spawn one worker"
+bash ./test/bash/attach.sh
+spec "pm2 attach method"
 
 # Issues related
 bash ./test/bash/issues/2337.sh
